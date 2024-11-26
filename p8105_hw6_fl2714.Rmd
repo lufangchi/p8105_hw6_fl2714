@@ -1,0 +1,95 @@
+---
+title: "p8105_hw6_fl2714"
+author: "Fangchi"
+date: "2024-11-26"
+output: github_document
+---
+```{r}
+
+library(tidyverse)
+library(modelr)
+library(mgcv)
+library(dplyr)
+library(ggplot2)
+library(purrr)
+library(tidyr)
+
+```
+
+### Problem 2
+
+```{r}
+# load data
+url <- "https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv"
+homicide_data <- read.csv(url, stringsAsFactors = FALSE)
+
+```
+
+
+```{r}
+
+cleaned_data <- homicide_data %>%
+  mutate(city_state = paste(city, state, sep = ", ")) %>% # create variable
+  mutate(solved_binary = ifelse(disposition == "Closed by arrest", 1, 0)) %>% # whether the homicide is solved
+  filter(!city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")) %>%
+  filter(victim_race %in% c("White", "Black")) %>% #  limit victim_race
+  mutate(
+    victim_age = ifelse(victim_age == "Unknown", NA, victim_age),  
+    victim_age = as.numeric(victim_age)                            
+  ) %>%
+  drop_na(victim_age)  
+
+```
+
+
+```{r}
+
+baltimore_data <- cleaned_data %>%
+  filter(city_state == "Baltimore, MD")
+
+glm_baltimore <- glm(solved_binary ~ victim_age + victim_sex + victim_race,
+                     data = baltimore_data, family = "binomial")
+
+baltimore_results <- broom::tidy(glm_baltimore, exponentiate = TRUE, conf.int = TRUE)
+
+baltimore_results %>%
+  filter(term == "victim_sexMale")
+baltimore_results
+
+```
+
+
+```{r}
+
+city_results <- cleaned_data %>%
+  group_by(city_state) %>%
+  nest() %>%  
+  mutate(
+    glm_fit = map(data, ~ glm(solved_binary ~ victim_age + victim_sex + victim_race,
+                              data = ., family = "binomial")),
+    tidy_results = map(glm_fit, ~ broom::tidy(.x, exponentiate = TRUE, conf.int = TRUE))
+  ) %>%
+  unnest(tidy_results) %>%  
+  filter(term == "victim_sexMale") %>% 
+  select(city_state, estimate, conf.low, conf.high)
+
+city_results
+
+```
+```{r}
+
+
+city_results <- city_results %>%
+  arrange(estimate) %>%
+  mutate(city_state = factor(city_state, levels = city_state))  
+
+ggplot(city_results, aes(x = city_state, y = estimate)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
+  coord_flip() +
+  labs(title = "Adjusted Odds Ratios (OR) by City",
+       x = "City", y = "OR (Male vs Female Victims)") +
+  theme_minimal()
+
+```
+
