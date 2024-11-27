@@ -4,6 +4,7 @@ author: "Fangchi"
 date: "2024-11-26"
 output: github_document
 ---
+
 ```{r}
 
 library(tidyverse)
@@ -13,12 +14,14 @@ library(dplyr)
 library(ggplot2)
 library(purrr)
 library(tidyr)
+library(rsample)
 
 ```
 
 ### Problem 2
 
 ```{r}
+
 # load data
 url <- "https://raw.githubusercontent.com/washingtonpost/data-homicides/master/homicide-data.csv"
 homicide_data <- read.csv(url, stringsAsFactors = FALSE)
@@ -51,10 +54,8 @@ glm_baltimore <- glm(solved_binary ~ victim_age + victim_sex + victim_race,
                      data = baltimore_data, family = "binomial")
 
 baltimore_results <- broom::tidy(glm_baltimore, exponentiate = TRUE, conf.int = TRUE)
-
 baltimore_results %>%
   filter(term == "victim_sexMale")
-baltimore_results
 
 ```
 
@@ -73,8 +74,6 @@ city_results <- cleaned_data %>%
   filter(term == "victim_sexMale") %>% 
   select(city_state, estimate, conf.low, conf.high)
 
-city_results
-
 ```
 ```{r}
 
@@ -89,6 +88,114 @@ ggplot(city_results, aes(x = city_state, y = estimate)) +
   coord_flip() +
   labs(title = "Adjusted Odds Ratios (OR) by City",
        x = "City", y = "OR (Male vs Female Victims)") +
+  theme_minimal()
+
+```
+
+### Problem 3
+
+```{r}
+
+birthweight <- read.csv("data/birthweight.csv")
+
+```
+
+
+```{r}
+
+birthweight <- birthweight %>%
+  mutate(
+    babysex = factor(babysex, levels = c(1, 2), labels = c("Male", "Female")),
+    malform = factor(malform, levels = c(0, 1), labels = c("Absent", "Present")),
+    frace = factor(frace),
+    mrace = factor(mrace)
+  ) %>%
+  drop_na()  
+
+```
+
+
+```{r}
+
+# 假设模型：基于母亲的变量、胎长、胎龄等
+model_hypothesis <- lm(bwt ~ babysex + bhead + blength + gaweeks + wtgain + smoken, data = birthweight)
+
+# 模型摘要
+summary(model_hypothesis)
+
+
+```
+
+```{r}
+
+# 添加预测值和残差
+birthweight <- birthweight %>%
+  add_predictions(model_hypothesis, var = "pred") %>%
+  add_residuals(model_hypothesis, var = "resid")
+
+# 绘制残差与拟合值的散点图
+ggplot(birthweight, aes(x = pred, y = resid)) +
+  geom_point(alpha = 0.5) +
+  geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
+  labs(title = "Residuals vs Fitted Values",
+       x = "Fitted Values",
+       y = "Residuals") +
+  theme_minimal()
+
+
+
+```
+```{r}
+
+model_main_effects <- lm(bwt ~ blength + gaweeks, data = birthweight)
+summary(model_main_effects)
+
+```
+```{r}
+
+model_interactions <- lm(bwt ~ bhead * blength * babysex, data = birthweight)
+summary(model_interactions)
+
+```
+```{r}
+
+set.seed(123)  
+cv_df <- crossv_mc(birthweight, 100) %>%  
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+
+# 在训练集上拟合模型并在测试集上评估 RMSE
+cv_df <- cv_df %>%
+  mutate(
+    model_hypothesis = map(train, ~ lm(bwt ~ babysex + bhead + blength + gaweeks + wtgain + smoken, data = .)),
+    model_main_effects = map(train, ~ lm(bwt ~ blength + gaweeks, data = .)),
+    model_interactions = map(train, ~ lm(bwt ~ bhead * blength * babysex, data = .)),
+    rmse_hypothesis = map2_dbl(model_hypothesis, test, ~ rmse(model = .x, data = .y)),
+    rmse_main_effects = map2_dbl(model_main_effects, test, ~ rmse(model = .x, data = .y)),
+    rmse_interactions = map2_dbl(model_interactions, test, ~ rmse(model = .x, data = .y))
+  )
+
+```
+
+```{r}
+# 整理数据用于绘图
+cv_long <- cv_df %>%
+  select(starts_with("rmse")) %>%
+  pivot_longer(
+    cols = everything(),
+    names_to = "model",
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  )
+
+# 绘制 RMSE 分布
+ggplot(cv_long, aes(x = model, y = rmse)) +
+  geom_violin() +
+  labs(title = "Cross-Validated RMSE for Each Model",
+       x = "Model",
+       y = "RMSE") +
   theme_minimal()
 
 ```
