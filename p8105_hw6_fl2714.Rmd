@@ -117,10 +117,10 @@ birthweight <- birthweight %>%
 
 ```{r}
 
-# 假设模型：基于母亲的变量、胎长、胎龄等
+
 model_hypothesis <- lm(bwt ~ babysex + bhead + blength + gaweeks + wtgain + smoken, data = birthweight)
 
-# 模型摘要
+
 summary(model_hypothesis)
 
 
@@ -128,12 +128,11 @@ summary(model_hypothesis)
 
 ```{r}
 
-# 添加预测值和残差
+
 birthweight <- birthweight %>%
   add_predictions(model_hypothesis, var = "pred") %>%
   add_residuals(model_hypothesis, var = "resid")
 
-# 绘制残差与拟合值的散点图
 ggplot(birthweight, aes(x = pred, y = resid)) +
   geom_point(alpha = 0.5) +
   geom_hline(yintercept = 0, color = "red", linetype = "dashed") +
@@ -141,8 +140,6 @@ ggplot(birthweight, aes(x = pred, y = resid)) +
        x = "Fitted Values",
        y = "Residuals") +
   theme_minimal()
-
-
 
 ```
 ```{r}
@@ -166,7 +163,6 @@ cv_df <- crossv_mc(birthweight, 100) %>%
     test = map(test, as_tibble)
   )
 
-# 在训练集上拟合模型并在测试集上评估 RMSE
 cv_df <- cv_df %>%
   mutate(
     model_hypothesis = map(train, ~ lm(bwt ~ babysex + bhead + blength + gaweeks + wtgain + smoken, data = .)),
@@ -180,7 +176,7 @@ cv_df <- cv_df %>%
 ```
 
 ```{r}
-# 整理数据用于绘图
+
 cv_long <- cv_df %>%
   select(starts_with("rmse")) %>%
   pivot_longer(
@@ -190,7 +186,7 @@ cv_long <- cv_df %>%
     names_prefix = "rmse_"
   )
 
-# 绘制 RMSE 分布
+
 ggplot(cv_long, aes(x = model, y = rmse)) +
   geom_violin() +
   labs(title = "Cross-Validated RMSE for Each Model",
