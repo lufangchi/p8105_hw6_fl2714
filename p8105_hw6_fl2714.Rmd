@@ -15,6 +15,7 @@ library(ggplot2)
 library(purrr)
 library(tidyr)
 library(rsample)
+library(car)
 
 ```
 
@@ -35,14 +36,15 @@ cleaned_data <- homicide_data %>%
   mutate(city_state = paste(city, state, sep = ", ")) %>% # create variable
   mutate(solved_binary = ifelse(disposition == "Closed by arrest", 1, 0)) %>% # whether the homicide is solved
   filter(!city_state %in% c("Dallas, TX", "Phoenix, AZ", "Kansas City, MO", "Tulsa, AL")) %>%
-  filter(victim_race %in% c("White", "Black")) %>% #  limit victim_race
+  filter(victim_race %in% c("White", "Black")) %>% # limit victim_race
   mutate(
     victim_age = ifelse(victim_age == "Unknown", NA, victim_age),  
     victim_age = as.numeric(victim_age)                            
-  ) %>%
+  ) %>% # victim_age is numeric
   drop_na(victim_age)  
 
 ```
+
 
 
 ```{r}
@@ -53,55 +55,80 @@ baltimore_data <- cleaned_data %>%
 glm_baltimore <- glm(solved_binary ~ victim_age + victim_sex + victim_race,
                      data = baltimore_data, family = "binomial")
 
-baltimore_results <- broom::tidy(glm_baltimore, exponentiate = TRUE, conf.int = TRUE)
-baltimore_results %>%
-  filter(term == "victim_sexMale")
+glm_baltimore |> 
+  broom::tidy(conf.int = TRUE) |> 
+  mutate(OR = exp(estimate), 
+         CI_low = exp(conf.low), 
+         CI_high = exp(conf.high)) |>  
+  select(term, log_OR = estimate, OR, p.value, CI_low, CI_high) |> 
+  knitr::kable(digits = 3)
 
 ```
 
+The estimate for the adjusted odds ratio comparing male victims to female victims is 0.426, with a 95% confidence interval of [0.324, 0.558], indicating that the odds of solving homicides for male victims are significantly lower than those for female victims, controlling for other variables.
 
 ```{r}
 
-city_results <- cleaned_data %>%
-  group_by(city_state) %>%
-  nest() %>%  
+# Group the data by city_state
+results <- cleaned_data %>%
+  group_by(city_state) %>% 
+  nest() %>%  # Create a nested data frame for each city
   mutate(
-    glm_fit = map(data, ~ glm(solved_binary ~ victim_age + victim_sex + victim_race,
-                              data = ., family = "binomial")),
-    tidy_results = map(glm_fit, ~ broom::tidy(.x, exponentiate = TRUE, conf.int = TRUE))
+    glm_model = map(data, ~ glm(solved_binary ~ victim_age + victim_sex + victim_race,
+                                data = .x, family = "binomial")),  # Fit the logistic model for each city
+    glm_tidy = map(glm_model, ~ broom::tidy(.x, conf.int = TRUE))  # Extract coefficients and CI
   ) %>%
-  unnest(tidy_results) %>%  
-  filter(term == "victim_sexMale") %>% 
-  select(city_state, estimate, conf.low, conf.high)
+  unnest(cols = glm_tidy) %>%  # Unnest the coefficients into a flat data frame
+  filter(term == "victim_sexMale") %>%  # Select only the row for male vs female comparison
+  mutate(
+    OR = exp(estimate),  # Convert log(OR) to OR
+    CI_low = exp(conf.low),  # Convert lower CI bound
+    CI_high = exp(conf.high)  # Convert upper CI bound
+  ) %>%
+  select(city_state, OR, CI_low, CI_high, p.value)  # Keep relevant columns
+
+# Display results
+results %>%
+  knitr::kable(digits = 3)
+
 
 ```
 ```{r}
 
 
-city_results <- city_results %>%
-  arrange(estimate) %>%
+# Create the data for plotting
+plot_data <- results %>%  
+  arrange(OR) %>%  # Arrange cities by OR
   mutate(city_state = factor(city_state, levels = city_state))  
 
-ggplot(city_results, aes(x = city_state, y = estimate)) +
-  geom_point() +
-  geom_errorbar(aes(ymin = conf.low, ymax = conf.high), width = 0.2) +
-  coord_flip() +
-  labs(title = "Adjusted Odds Ratios (OR) by City",
-       x = "City", y = "OR (Male vs Female Victims)") +
-  theme_minimal()
+# Plot the ORs and CIs using ggplot
+ggplot(plot_data, aes(x = city_state, y = OR)) +
+  geom_point(size = 3) +  
+  geom_errorbar(aes(ymin = CI_low, ymax = CI_high), width = 0.2) + 
+  coord_flip() +  # Flip coordinates for better readability
+  theme_minimal() +  # Use a minimal theme
+  labs(
+    title = "Adjusted Odds Ratios (OR) and Confidence Intervals (CI) by City",
+    x = "City",
+    y = "Adjusted Odds Ratio (OR)"
+  ) +
+  geom_hline(yintercept = 1, linetype = "dashed", color = "red") +  # Add a reference line at OR = 1
+  theme(
+    axis.text.y = element_text(size = 8), 
+    axis.text.x = element_text(size = 8)
+  )
 
 ```
+General Trend: In most cities, male victims are less likely to have their homicides solved compared to female victims (OR < 1).
+Statistical Significance: Cities like Baltimore, MD and Atlanta, GA show significant effects with confidence intervals entirely below 1, indicating a strong association.
+Variability: Some cities show no significant difference (OR ≈ 1), while a few have OR > 1 with wide confidence intervals, suggesting uncertainty or smaller sample sizes.
 
 ### Problem 3
 
 ```{r}
+# Load and clean the data
 
 birthweight <- read.csv("data/birthweight.csv")
-
-```
-
-
-```{r}
 
 birthweight <- birthweight %>%
   mutate(
@@ -117,17 +144,30 @@ birthweight <- birthweight %>%
 
 ```{r}
 
-
 model_hypothesis <- lm(bwt ~ babysex + bhead + blength + gaweeks + wtgain + smoken, data = birthweight)
-
-
 summary(model_hypothesis)
-
 
 ```
 
+This model is based on hypothesized factors known to influence birthweight, supported by biological and clinical evidence:
+
+babysex: Male babies typically have higher birthweight than female babies
+bhead (head circumference): A direct indicator of the baby’s size
+blength (length): size-related factor correlated with birthweight
+gaweeks (gestational age): Longer gestation often leads to higher birthweight
+wtgain (maternal weight gain): Reelated to maternal health and nutrition during pregnancy
+smoken (maternal smoking): Smoking restricts fetal growth
+
+These variables were chosen based on domain knowledge about the factors influencing birthweight.
+
 ```{r}
 
+vif(model_hypothesis)
+
+```
+
+
+```{r}
 
 birthweight <- birthweight %>%
   add_predictions(model_hypothesis, var = "pred") %>%
